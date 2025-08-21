@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -74,33 +75,34 @@ std::unordered_map<char, std::unordered_map<const char *, char>> map = {
          {"birds.mp3.wav", 'a'},                               //
      }}};
 
-void load(char which,
-          std::unordered_map<char, gam::SamplePlayer<float> *> &player) {
-  if (which < '1' || which > '3') {
-    std::cerr << "Invalid key: " << which << std::endl;
-    return;
-  }
-
-  auto &keybinding = map[which];
-  if (keybinding.empty()) {
-    std::cerr << "No samples found for key: " << which << std::endl;
-    return;
-  }
-
-  player.clear();
-  for (const auto &pair : keybinding) {
-    auto *p = new gam::SamplePlayer<float>(pair.first);  // Load the sample
-    p->finish();
-    player[pair.second] = p;
-    std::cout << pair.second << " -> "  //
-              << pair.first << " (" << p->size() << ")" << std::endl;
-  }
-}
-
 struct MyApp : App {
-  std::unordered_map<char, gam::SamplePlayer<float> *> player;
+  std::unordered_map<char, std::unique_ptr<gam::SamplePlayer<float>>> player;
 
   std::mutex lock;
+
+  void load(char which) {
+    if (which < '1' || which > '3') {
+      std::cerr << "Invalid key: " << which << std::endl;
+      return;
+    }
+
+    auto &keybinding = map[which];
+    if (keybinding.empty()) {
+      std::cerr << "No samples found for key: " << which << std::endl;
+      return;
+    }
+
+    player.clear();  // Clear previous samples
+
+    for (const auto &pair : keybinding) {
+      player[pair.second].reset(
+          new gam::SamplePlayer<float>(pair.first));  // Load the sample
+      player[pair.second]->finish();
+      std::cout << pair.second << " -> "  //
+                << pair.first << " (" << player[pair.second]->size() << ")"
+                << std::endl;
+    }
+  }
 
   void onCreate() override {}
 
@@ -122,7 +124,7 @@ struct MyApp : App {
       lock.unlock();
 
       // DCblock filter because a lot of the samples have DC offset
-      y1 = f - x1 + 0.995 * y1;
+      y1 = f - x1 + 0.9905 * y1;
       x1 = f;
 
       io.out(0) = y1;
@@ -133,7 +135,7 @@ struct MyApp : App {
   bool onKeyDown(const Keyboard &k) override {
     if (k.key() >= '1' && k.key() <= '3') {
       lock.lock();
-      load(k.key(), player);
+      load(k.key());
       lock.unlock();
       return false;
     }
